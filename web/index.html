@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR开关识别 Demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0e1a; color: #e0e6f0; font-family: -apple-system, "Microsoft YaHei", sans-serif; overflow: hidden; }
+
+/* 主容器 */
+.container { display: flex; height: 100vh; }
+
+/* 左侧：摄像头 */
+.camera-panel {
+  flex: 1; position: relative; background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+#video { width: 100%; height: 100%; object-fit: cover; }
+#canvas { display: none; }
+
+/* 扫描框 */
+.scan-overlay {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.scan-frame {
+  width: 60%; height: 50%; border: 2px solid rgba(0,212,255,0.6);
+  border-radius: 12px; position: relative;
+}
+.scan-frame::before {
+  content: ''; position: absolute; inset: -2px;
+  border: 2px solid transparent; border-radius: 12px;
+  background: linear-gradient(90deg, #00d4ff, #00ff88, #00d4ff) border-box;
+  -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: rotate-border 3s linear infinite;
+  opacity: 0.4;
+}
+@keyframes rotate-border { to { filter: hue-rotate(360deg); } }
+
+.scan-line {
+  position: absolute; left: 5%; width: 90%; height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+  animation: scan 2.5s ease-in-out infinite;
+  box-shadow: 0 0 12px #00d4ff;
+}
+@keyframes scan { 0%,100% { top: 10%; } 50% { top: 85%; } }
+
+.scan-hint {
+  position: absolute; bottom: -36px; width: 100%; text-align: center;
+  color: rgba(0,212,255,0.8); font-size: 14px;
+}
+
+/* 状态栏 */
+.status-bar {
+  position: absolute; top: 16px; left: 16px; right: 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  pointer-events: none;
+}
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: #00ff88; display: inline-block; margin-right: 8px; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.status-text { font-size: 13px; color: #8892a4; display: flex; align-items: center; }
+
+/* 控制按钮 */
+.controls {
+  position: absolute; bottom: 24px; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 16px;
+}
+.btn {
+  padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 15px; font-weight: 600; transition: all 0.2s;
+}
+.btn-primary {
+  background: linear-gradient(135deg, #00d4ff, #0088ff);
+  color: #fff; box-shadow: 0 4px 20px rgba(0,136,255,0.4);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,136,255,0.6); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary.loading { opacity: 0.7; pointer-events: none; }
+.btn-secondary { background: rgba(255,255,255,0.1); color: #a0a8b8; border: 1px solid rgba(255,255,255,0.15); }
+.btn-secondary:hover { background: rgba(255,255,255,0.15); }
+
+/* 右侧：结果面板 */
+.result-panel {
+  width: 420px; background: #0f1320; border-left: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.panel-header {
+  padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 18px; font-weight: 600;
+  background: linear-gradient(135deg, rgba(0,212,255,0.1), rgba(0,136,255,0.05));
+}
+
+/* 空状态 */
+.empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; color: #4a5568; padding: 40px;
+}
+.empty-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.3; }
+.empty-text { text-align: center; line-height: 1.8; }
+
+/* 识别结果卡片 */
+.result-card { display: none; flex-direction: column; flex: 1; }
+.result-card.active { display: flex; }
+
+.equip-header {
+  padding: 20px; background: linear-gradient(135deg, rgba(0,255,136,0.08), rgba(0,212,255,0.05));
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.equip-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 4px;
+  background: rgba(0,212,255,0.15); color: #00d4ff; font-size: 12px; margin-bottom: 8px;
+}
+.equip-name { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.equip-model { font-size: 13px; color: #8892a4; }
+
+.info-section { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.info-title {
+  font-size: 13px; font-weight: 600; color: #00d4ff; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.info-title::before { content: ''; width: 3px; height: 14px; background: #00d4ff; border-radius: 2px; }
+
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.info-item { background: rgba(255,255,255,0.03); padding: 8px 12px; border-radius: 6px; }
+.info-label { font-size: 11px; color: #6b7280; margin-bottom: 2px; }
+.info-value { font-size: 14px; color: #e0e6f0; }
+
+.step-list { list-style: none; counter-reset: step; }
+.step-list li {
+  counter-increment: step; position: relative;
+  padding: 8px 0 8px 32px; font-size: 13px; line-height: 1.5; color: #c0c8d8;
+}
+.step-list li::before {
+  content: counter(step); position: absolute; left: 0; top: 8px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(0,212,255,0.15); color: #00d4ff;
+  font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.safety-list { list-style: none; }
+.safety-list li {
+  padding: 6px 0 6px 20px; font-size: 13px; color: #fbbf24;
+  position: relative; line-height: 1.5;
+}
+.safety-list li::before {
+  content: '⚠'; position: absolute; left: 0; top: 6px; font-size: 12px;
+}
+
+.ocr-texts { margin-top: 8px; }
+.ocr-tag {
+  display: inline-block; padding: 2px 8px; margin: 2px;
+  background: rgba(255,255,255,0.06); border-radius: 4px;
+  font-size: 12px; color: #8892a4;
+}
+
+/* 操作规程切换 */
+.tab-bar { display: flex; gap: 0; }
+.tab {
+  flex: 1; padding: 10px; text-align: center; cursor: pointer;
+  font-size: 13px; color: #6b7280; border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.tab.active { color: #00d4ff; border-bottom-color: #00d4ff; background: rgba(0,212,255,0.05); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* 自动识别模式指示 */
+.auto-indicator {
+  position: absolute; top: 16px; right: 16px;
+  padding: 6px 12px; border-radius: 20px;
+  background: rgba(0,255,136,0.15); color: #00ff88;
+  font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+}
+.auto-indicator.paused { background: rgba(255,187,59,0.15); color: #fbbf24; }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- 左：摄像头 -->
+  <div class="camera-panel">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div class="scan-overlay">
+      <div class="scan-frame">
+        <div class="scan-line"></div>
+        <div class="scan-hint">将开关设备或铭牌置于框内</div>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <span class="status-text"><span class="status-dot" id="camDot"></span><span id="camStatus">摄像头启动中...</span></span>
+    </div>
+
+    <div class="auto-indicator" id="autoIndicator">自动识别中</div>
+
+    <div class="controls">
+      <button class="btn btn-primary" id="captureBtn" onclick="captureAndRecognize()">拍照识别</button>
+      <button class="btn btn-secondary" id="autoBtn" onclick="toggleAuto()">暂停自动</button>
+      <label class="btn btn-secondary" style="position:relative;">
+        上传图片
+        <input type="file" accept="image/*" onchange="uploadImage(event)" style="position:absolute;inset:0;opacity:0;cursor:pointer;">
+      </label>
+    </div>
+  </div>
+
+  <!-- 右：结果 -->
+  <div class="result-panel">
+    <div class="panel-header">设备识别结果</div>
+
+    <!-- 空状态 -->
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📷</div>
+      <div class="empty-text">
+        对准开关设备或铭牌<br>
+        系统每2秒自动识别<br>
+        也可点击「拍照识别」手动触发
+      </div>
+    </div>
+
+    <!-- 结果卡片 -->
+    <div class="result-card" id="resultCard">
+      <div class="equip-header">
+        <span class="equip-badge" id="eqCategory"></span>
+        <div class="equip-name" id="eqName"></div>
+        <div class="equip-model" id="eqModel"></div>
+      </div>
+
+      <div class="info-section">
+        <div class="info-title">基本参数</div>
+        <div class="info-grid" id="eqParams"></div>
+      </div>
+
+      <div class="info-section">
+        <div class="info-title">OCR识别文字</div>
+        <div class="ocr-texts" id="ocrTexts"></div>
+      </div>
+
+      <div class="info-section" style="flex:1; display:flex; flex-direction:column;">
+        <div class="tab-bar">
+          <div class="tab active" onclick="switchTab('inspection')">巡检要点</div>
+          <div class="tab" onclick="switchTab('close')">合闸操作</div>
+          <div class="tab" onclick="switchTab('open')">分闸操作</div>
+          <div class="tab" onclick="switchTab('safety')">安全事项</div>
+        </div>
+        <div style="padding: 12px 0; flex:1; overflow-y:auto;">
+          <div class="tab-content active" id="tab-inspection"></div>
+          <div class="tab-content" id="tab-close"></div>
+          <div class="tab-content" id="tab-open"></div>
+          <div class="tab-content" id="tab-safety"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let autoMode = true;
+let autoTimer = null;
+let recognizing = false;
+
+// ── 启动摄像头 ──
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    document.getElementById('camDot').style.background = '#00ff88';
+    document.getElementById('camStatus').textContent = '摄像头已就绪';
+    startAutoRecognize();
+  } catch (e) {
+    document.getElementById('camDot').style.background = '#ff4444';
+    document.getElementById('camStatus').textContent = '摄像头启动失败: ' + e.message;
+  }
+}
+
+// ── 截图 ──
+function captureFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+// ── 识别 ──
+async function captureAndRecognize() {
+  if (recognizing) return;
+  recognizing = true;
+  const btn = document.getElementById('captureBtn');
+  btn.classList.add('loading');
+  btn.textContent = '识别中...';
+
+  try {
+    const imageData = captureFrame();
+    const resp = await fetch(API + '/api/recognize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageData }),
+    });
+    const data = await resp.json();
+    if (data.success && data.equipment) {
+      showResult(data);
+    }
+    // 不成功时不清空已有结果
+  } catch (e) {
+    console.error('识别失败:', e);
+  } finally {
+    recognizing = false;
+    btn.classList.remove('loading');
+    btn.textContent = '拍照识别';
+  }
+}
+
+// ── 显示结果 ──
+let lastModelKey = '';
+function showResult(data) {
+  if (data.model_key === lastModelKey) return; // 同型号不重复刷新
+  lastModelKey = data.model_key;
+  const eq = data.equipment;
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('resultCard').classList.add('active');
+
+  document.getElementById('eqCategory').textContent = eq.category;
+  document.getElementById('eqName').textContent = eq.full_name;
+  document.getElementById('eqModel').textContent = eq.description;
+
+  // 参数
+  const params = [
+    ['额定电压', eq.voltage],
+    ['额定电流', eq.rated_current],
+    ['开断电流', eq.breaking_current],
+    ['操作机构', eq.mechanism],
+  ];
+  document.getElementById('eqParams').innerHTML = params.map(([l, v]) =>
+    `<div class="info-item"><div class="info-label">${l}</div><div class="info-value">${v}</div></div>`
+  ).join('');
+
+  // OCR文字
+  document.getElementById('ocrTexts').innerHTML = data.ocr_texts.map(t =>
+    `<span class="ocr-tag">${t}</span>`
+  ).join('');
+
+  // 巡检
+  document.getElementById('tab-inspection').innerHTML =
+    `<ol class="step-list">${eq.inspection.map(s => `<li>${s}</li>`).join('')}</ol>`;
+
+  // 合闸
+  document.getElementById('tab-close').innerHTML =
+    `<ol class="step-list">${(eq.operation?.close || []).map(s => `<li>${s}</li>`).join('')}</ol>`;
+
+  // 分闸
+  document.getElementById('tab-open').innerHTML =
+    `<ol class="step-list">${(eq.operation?.open || []).map(s => `<li>${s}</li>`).join('')}</ol>`;
+
+  // 安全
+  document.getElementById('tab-safety').innerHTML =
+    `<ul class="safety-list">${eq.safety.map(s => `<li>${s}</li>`).join('')}</ul>`;
+
+  // 默认显示巡检tab
+  switchTab('inspection');
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['inspection', 'close', 'open', 'safety'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ── 自动识别 ──
+function startAutoRecognize() {
+  if (autoTimer) clearInterval(autoTimer);
+  if (autoMode) {
+    autoTimer = setInterval(() => { if (!recognizing) captureAndRecognize(); }, 2000);
+  }
+}
+
+function toggleAuto() {
+  autoMode = !autoMode;
+  const btn = document.getElementById('autoBtn');
+  const ind = document.getElementById('autoIndicator');
+  if (autoMode) {
+    btn.textContent = '暂停自动';
+    ind.textContent = '自动识别中';
+    ind.classList.remove('paused');
+    startAutoRecognize();
+  } else {
+    btn.textContent = '开启自动';
+    ind.textContent = '自动已暂停';
+    ind.classList.add('paused');
+    if (autoTimer) clearInterval(autoTimer);
+  }
+}
+
+// ── 上传图片识别 ──
+function uploadImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    // 在摄像头区域显示上传的图片
+    video.style.display = 'none';
+    let preview = document.getElementById('uploadPreview');
+    if (!preview) {
+      preview = document.createElement('img');
+      preview.id = 'uploadPreview';
+      preview.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;inset:0;';
+      video.parentElement.insertBefore(preview, video);
+    }
+    preview.src = e.target.result;
+    // 发送识别
+    recognizing = true;
+    const btn = document.getElementById('captureBtn');
+    btn.classList.add('loading'); btn.textContent = '识别中...';
+    try {
+      const resp = await fetch(API + '/api/recognize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: e.target.result }),
+      });
+      const data = await resp.json();
+      if (data.success && data.equipment) { lastModelKey = ''; showResult(data); }
+      else { alert('未识别到已知型号\\nOCR文字: ' + (data.ocr_texts||[]).join(', ')); }
+    } catch(err) { alert('请求失败: ' + err.message); }
+    finally { recognizing = false; btn.classList.remove('loading'); btn.textContent = '拍照识别'; }
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+// 启动
+startCamera();
+</script>
+</body>
+</html>

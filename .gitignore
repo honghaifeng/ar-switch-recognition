@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pem
+.DS_Store
+model/*.pt
+model/*.onnx
+data/images/
