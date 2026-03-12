@@ -166,4 +166,4 @@ if __name__ == "__main__":
     cert = cert_dir / "cert.pem"
     key = cert_dir / "key.pem"
     ssl_args = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)} if cert.exists() else {}
-    uvicorn.run(app, host="0.0.0.0", port=8080, **ssl_args)
+    uvicorn.run(app, host="0.0.0.0", port=8081, **ssl_args)
